@@ -5,10 +5,6 @@
 #ifndef _LB_TESTBED_SSE_H_
 #define _LB_TESTBED_SSE_H_
 
-#include <emmintrin.h>
-#include <nmmintrin.h>
-#include <rte_mbuf.h>
-#include <avxintrin.h>
 #include "lbtestbed.h"
 #include "lbtestbed_common.h"
 
@@ -55,13 +51,13 @@ processx4_step3(struct rte_mbuf *pkt[FWDSTEP], uint16_t dst_port[FWDSTEP],
 
 	// Updated IP address in IPv4 Header
     update_ipv4_dst_ip((struct ipv4_hdr *)((struct ether_hdr *)p[0] + 1),
-                       dst_ip[0]);
+                       &dst_ip[0]);
     update_ipv4_dst_ip((struct ipv4_hdr *)((struct ether_hdr *)p[1] + 1),
-                       dst_ip[1]);
+                       &dst_ip[1]);
     update_ipv4_dst_ip((struct ipv4_hdr *)((struct ether_hdr *)p[2] + 1),
-                       dst_ip[2]);
+                       &dst_ip[2]);
     update_ipv4_dst_ip((struct ipv4_hdr *)((struct ether_hdr *)p[3] + 1),
-                       dst_ip[3]);
+                       &dst_ip[3]);
 
 	rfc1812_process((struct ipv4_hdr *)((struct ether_hdr *)p[0] + 1),
 					&dst_port[0], pkt[0]->packet_type);

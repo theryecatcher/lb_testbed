@@ -265,8 +265,8 @@ send_packetsx4(struct lcore_conf *qconf, uint16_t port, struct rte_mbuf *m[],
 }
 
 static __rte_always_inline void
-update_ipv4_dst_ip(struct ipv4_hdr *ipv4_hdr, uint32_t dip) {
-    ipv4_hdr->dst_addr = dip;
+update_ipv4_dst_ip(struct ipv4_hdr *ipv4_hdr, uint32_t *dip) {
+    ipv4_hdr->dst_addr = dip[0];
 }
 
 

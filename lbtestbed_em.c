@@ -36,6 +36,8 @@
 #define DEFAULT_HASH_FUNC       rte_hash_crc
 #else
 #include <rte_jhash.h>
+#include <math.h>
+
 #define DEFAULT_HASH_FUNC       rte_jhash
 #endif
 
@@ -63,6 +65,12 @@ union ipv4_5tuple_host {
 struct ipv4_l3fwd_em_route {
 	struct ipv4_5tuple key;
 	uint8_t if_out;
+};
+
+struct ipv4_addr_elem {
+    uint32_t ip_addr;
+    float weight_ratio;
+    bool used;
 };
 
 struct rte_hash *ipv4_lbtestbed_em_lookup_struct[NB_SOCKETS];
@@ -97,6 +105,8 @@ ipv4_hash_crc(const void *data, __rte_unused uint32_t data_len,
 static uint8_t ipv4_lbtestbed_out_if[LBTESTBED_HASH_ENTRIES] __rte_cache_aligned;
 static uint32_t ipv4_lbtestbed_out_ip[LBTESTBED_HASH_ENTRIES] __rte_cache_aligned;
 
+static struct ipv4_addr_elem lbtestbed_addr[NB_POOL_ADDRESSES]; __rte_cache_aligned;
+
 static rte_xmm_t mask0;
 
 #if defined(RTE_MACHINE_CPUFLAG_SSE2)
@@ -126,6 +136,16 @@ em_mask_key(void *key, xmm_t mask)
 #else
 #error No vector engine (SSE, NEON, ALTIVEC) available, check your toolchain
 #endif
+
+static inline uint32_t
+em_get_available_ip(){
+    for (uint i = 0; i < sizeof(lbtestbed_addr); i++) {
+        if (lbtestbed_addr[i].used == 0) {
+            lbtestbed_addr[i].used = 1;
+            return lbtestbed_addr[i].ip_addr;
+        }
+    }
+}
 
 static inline uint16_t
 em_get_ipv4_dst_port(void *ipv4_hdr, uint16_t portid, void *lookup_struct)
@@ -469,6 +489,22 @@ setup_hash(const int socketid)
 		rte_exit(EXIT_FAILURE,
 			"Unable to create the lbtestbed hash on socket %d\n",
 			socketid);
+
+    /* Calculate the sum of all the weights */
+    uint32_t sum_of_weights = 255;
+//    for (int i = 0; i < sizeof(lbtestbed_addr); i++) {
+//        sum_of_weights += lbtestbed_addr->weight;
+//    }
+
+	/* Create Address Pool */
+	int k = 0;
+	for (int i = 1; i <= 255; i++) {
+	    for (int j = 0; j < 255; j++, k++) {
+            lbtestbed_addr[k].ip_addr = IPv4(10, 0, i, j);
+            lbtestbed_addr[k].used = 0;
+            lbtestbed_addr[k].weight_ratio = (1/sum_of_weights);
+	    }
+	}
 }
 
 /* Return ipv4/ipv6 em fwd lookup struct. */

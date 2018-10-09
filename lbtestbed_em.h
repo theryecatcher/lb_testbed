@@ -39,7 +39,8 @@ lbtestbed_em_simple_forward(struct rte_mbuf *m, uint16_t portid,
         if (dst_ip == 0){
             // 1. Pick one IP address according to the available
             // addresses in the IP Table w.r.t their weights
-            dst_ip = IPv4(10, 0, 1, 0);
+            // dst_ip = IPv4(10, 0, 1, 0);
+            dst_ip = em_get_available_ip();
             // 2. Add the hash to lookup table
             add_ipv4_flow_into_table(
 					qconf->ipv4_lookup_struct, ipv4_hdr, dst_ip);

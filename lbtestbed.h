@@ -27,6 +27,8 @@
 
 #define NB_SOCKETS        8
 
+#define NB_POOL_ADDRESSES   (255*255)
+
 /* Configure how many packets ahead to prefetch, when reading packets */
 #define PREFETCH_OFFSET	  3
 
