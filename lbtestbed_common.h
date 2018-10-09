@@ -1,9 +1,3 @@
-/* SPDX-License-Identifier: BSD-3-Clause
- * Copyright(c) 2016-2018 Intel Corporation.
- * Copyright(c) 2017-2018 Linaro Limited.
- */
-
-
 #ifndef _LB_TESTBED_COMMON_H_
 #define _LB_TESTBED_COMMON_H_
 

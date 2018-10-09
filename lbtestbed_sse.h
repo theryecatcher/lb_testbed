@@ -1,7 +1,3 @@
-/* SPDX-License-Identifier: BSD-3-Clause
- * Copyright(c) 2016 Intel Corporation
- */
-
 #ifndef _LB_TESTBED_SSE_H_
 #define _LB_TESTBED_SSE_H_
 
