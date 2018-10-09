@@ -400,7 +400,6 @@ static const char short_options[] =
 #define CMD_LINE_OPT_ETH_DEST "eth-dest"
 #define CMD_LINE_OPT_NO_NUMA "no-numa"
 #define CMD_LINE_OPT_ENABLE_JUMBO "enable-jumbo"
-#define CMD_LINE_OPT_PARSE_PTYPE "parse-ptype"
 enum {
 	/* long options mapped to a short option */
 
@@ -411,7 +410,6 @@ enum {
 	CMD_LINE_OPT_ETH_DEST_NUM,
 	CMD_LINE_OPT_NO_NUMA_NUM,
 	CMD_LINE_OPT_ENABLE_JUMBO_NUM,
-	CMD_LINE_OPT_PARSE_PTYPE_NUM,
 };
 
 static const struct option lgopts[] = {
@@ -419,7 +417,6 @@ static const struct option lgopts[] = {
 	{CMD_LINE_OPT_ETH_DEST, 1, 0, CMD_LINE_OPT_ETH_DEST_NUM},
 	{CMD_LINE_OPT_NO_NUMA, 0, 0, CMD_LINE_OPT_NO_NUMA_NUM},
 	{CMD_LINE_OPT_ENABLE_JUMBO, 0, 0, CMD_LINE_OPT_ENABLE_JUMBO_NUM},
-	{CMD_LINE_OPT_PARSE_PTYPE, 0, 0, CMD_LINE_OPT_PARSE_PTYPE_NUM},
 	{NULL, 0, 0, 0}
 };
 
@@ -511,16 +508,15 @@ parse_args(int argc, char **argv)
 			break;
 		}
 
-		case CMD_LINE_OPT_PARSE_PTYPE_NUM:
-			printf("soft parse-ptype is enabled\n");
-			parse_ptype = 1;
-			break;
-
 		default:
 			print_usage(prgname);
 			return -1;
 		}
 	}
+
+	/* Enable software parsing of packets */
+    printf("soft parse-ptype is enabled\n");
+    parse_ptype = 1;
 
 	/*
 	 * Nothing is selected, pick longest-prefix match
@@ -681,7 +677,7 @@ prepare_ptype_parser(uint16_t portid, uint16_t queueid)
 		return 1;
 
 	printf("port %d cannot parse packet type, please add --%s\n",
-	       portid, CMD_LINE_OPT_PARSE_PTYPE);
+	       portid, "parse_ptype");
 	return 0;
 }
 
