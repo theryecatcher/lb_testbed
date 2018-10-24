@@ -2,7 +2,7 @@
 APP = lb_testbed
 
 # all source are stored in SRCS-y
-SRCS-y := main.c lbtestbed_em.c
+SRCS-y := main.c lbtestbed_em.c murmur3.c
 
 # Build using pkg-config variables if possible
 $(shell pkg-config --exists libdpdk)

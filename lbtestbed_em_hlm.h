@@ -70,17 +70,17 @@ em_get_dst_ip_ipv4xN(struct lcore_conf *qconf, struct rte_mbuf *m[],
                        0 : ipv4_lbtestbed_out_ip[ret[i]]);
 
         if (dst_ip[i] == 0) {
-            // 1. Pick one IP address according to the available
-            // addresses in the IP Table w.r.t their weights
-            // dst_ip[i] = IPv4(10, 0, 1, 0);
-            dst_ip[i] = em_get_available_ip();
-            // 2. Add the hash to lookup table
             /* Get IPv4 header.*/
             ipv4_hdr = rte_pktmbuf_mtod_offset(m[i], struct ipv4_hdr *,
                                                sizeof(struct ether_hdr));
+            // 1. Pick one IP address according to the available
+            // addresses in the IP Table w.r.t their weights
+            // dst_ip[i] = IPv4(10, 0, 1, 0);
+            dst_ip[i] = em_get_available_ip(ipv4_hdr);
+            // 2. Add the hash to lookup table
             printf("Adding Hash for IP %"PRIu32" with ip %"PRIu32"\n",
                     ipv4_hdr->dst_addr, dst_ip[i]);
-            add_ipv4_flow_into_table(
+            add_ipv4_flow_into_conn_table(
                     qconf->ipv4_lookup_struct, ipv4_hdr, dst_ip[i]);
         }
     }
@@ -144,11 +144,11 @@ em_get_dst_ip(const struct lcore_conf *qconf, struct rte_mbuf *pkt)
             // 1. Pick one IP address according to the available
             // addresses in the IP Table w.r.t their weights
             // next_ip = IPv4(10, 0, 1, 0);
-            next_ip = em_get_available_ip();
+            next_ip = em_get_available_ip(ipv4_hdr);
             // 2. Add the hash to lookup table
             printf("Adding Hash for IP %"PRIu32" with ip %"PRIu32"\n",
                    ipv4_hdr->dst_addr, next_ip);
-            add_ipv4_flow_into_table(
+            add_ipv4_flow_into_conn_table(
                     qconf->ipv4_lookup_struct, ipv4_hdr, next_ip);
         }
 

@@ -22,6 +22,8 @@
 #include <rte_hash.h>
 
 #include "lbtestbed.h"
+#include "murmur3.h"
+#include <math.h>
 
 #if defined(RTE_ARCH_X86) || defined(RTE_MACHINE_CPUFLAG_CRC32)
 #define EM_HASH_CRC 1
@@ -65,8 +67,14 @@ struct ipv4_l3fwd_em_route {
 
 struct ipv4_addr_elem {
     uint32_t ip_addr;
-    float weight_ratio;
-    bool used;
+    uint16_t weight;
+    uint32_t seed;
+    bool avaialble;
+};
+
+struct hash_128 {
+	uint64_t hash0;
+	uint64_t hash1;
 };
 
 struct rte_hash *ipv4_lbtestbed_em_lookup_struct[NB_SOCKETS];
@@ -133,14 +141,37 @@ em_mask_key(void *key, xmm_t mask)
 #error No vector engine (SSE, NEON, ALTIVEC) available, check your toolchain
 #endif
 
+static inline void
+calculate_weight(const uint32_t *seed, const void *key, double *score){
+
+    struct hash_128 hash_value = {0, 0};
+
+    MurmurHash3_x86_128(key, sizeof(key), *seed, (void *)&hash_value);
+	double hash_f = (double)hash_value.hash1;
+    *score = 1.0 / -log(hash_f);
+}
+
 static inline uint32_t
-em_get_available_ip(){
+em_get_available_ip(void *ipv4_hdr){
+    // Need to replace key by the IPv4 flow
+    // for which we are supposed to assign IP
+	union ipv4_5tuple_host key;
+    uint node_idx = 0;
+    double max_score = 0;
+    double curr_score = 0;
+
+	key.xmm = em_mask_key(ipv4_hdr, mask0.x);
+
     for (uint i = 0; i < sizeof(lbtestbed_addr); i++) {
-        if (lbtestbed_addr[i].used == 0) {
-            lbtestbed_addr[i].used = 1;
-            return lbtestbed_addr[i].ip_addr;
-        }
+
+        calculate_weight(&lbtestbed_addr[i].seed, (const void *)&key, &curr_score);
+
+        if (curr_score > max_score){
+            max_score = curr_score;
+            node_idx = i;
+        };
     }
+    return lbtestbed_addr[node_idx].ip_addr;
 }
 
 static inline uint16_t
@@ -180,7 +211,7 @@ em_get_ipv4_dst_ip(void *ipv4_hdr, void *lookup_struct)
      */
     key.xmm = em_mask_key(ipv4_hdr, mask0.x);
 
-    /* Find destination port */
+    /* Find destination ip */
     ret = rte_hash_lookup(ipv4_lbtestbed_lookup_struct, (const void *)&key);
 
     return (ret < 0) ? 0 : ipv4_lbtestbed_out_ip[ret];
@@ -214,7 +245,7 @@ convert_ipv4_5tuple(struct ipv4_5tuple *key1,
 #define BIT_8_TO_15 0x0000ff00
 
 void
-add_ipv4_flow_into_table(void *lookup_struct, void *ipv4_hdr, uint32_t dst_ip) {
+add_ipv4_flow_into_conn_table(void *lookup_struct, void *ipv4_hdr, uint32_t dst_ip) {
 	int32_t ret;
 	union ipv4_5tuple_host newkey;
 
@@ -486,20 +517,13 @@ setup_hash(const int socketid)
 			"Unable to create the lbtestbed hash on socket %d\n",
 			socketid);
 
-    /* Calculate the sum of all the weights */
-    uint32_t sum_of_weights = 255;
-//    for (int i = 0; i < sizeof(lbtestbed_addr); i++) {
-//        sum_of_weights += lbtestbed_addr->weight;
-//    }
-
-	/* Create Address Pool */
-	int k = 0;
-	for (int i = 1; i <= 255; i++) {
-	    for (int j = 0; j < 255; j++, k++) {
-            lbtestbed_addr[k].ip_addr = IPv4(10, 0, i, j);
-            lbtestbed_addr[k].used = 0;
-            lbtestbed_addr[k].weight_ratio = (1/sum_of_weights);
-	    }
+    /* Create Address Pool
+     * Possibly to be replaced with reading from a file */
+    for (int i = 1; i < NB_POOL_ADDRESSES; i++) {
+        lbtestbed_addr[i].ip_addr = IPv4(10, 0, 1, i);
+        lbtestbed_addr[i].avaialble = 1;
+        lbtestbed_addr[i].seed = (uint32_t)i;
+        lbtestbed_addr[i].weight = 3;
 	}
 }
 

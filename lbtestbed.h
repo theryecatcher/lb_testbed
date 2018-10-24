@@ -23,7 +23,7 @@
 
 #define NB_SOCKETS        8
 
-#define NB_POOL_ADDRESSES   (255*255)
+#define NB_POOL_ADDRESSES   (16)
 
 /* Configure how many packets ahead to prefetch, when reading packets */
 #define PREFETCH_OFFSET	  3
@@ -172,8 +172,8 @@ int
 em_check_ptype(int portid);
 
 void
-add_ipv4_flow_into_table(void *lookup_struct,
-        void *ipv4_hdr, uint32_t dst_ip);
+add_ipv4_flow_into_conn_table(void *lookup_struct,
+                              void *ipv4_hdr, uint32_t dst_ip);
 
 uint16_t
 em_cb_parse_ptype(uint16_t port, uint16_t queue, struct rte_mbuf *pkts[],
