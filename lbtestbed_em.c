@@ -254,48 +254,6 @@ update_transient_dip(void *ipv4_hdr){
 	}
 }
 
-static inline void
-update_transient_dip(void *ipv4_hdr){
-
-	uint update_method;
-	struct ipv4_hdr *hdr =
-			(struct ipv4_hdr *)ipv4_hdr;
-	struct tcp_hdr *tcp;
-
-	update_method = hdr->next_proto_id;
-
-	/*
-     * Get 5 tuple: dst port, src port, dst IP address,
-     * src IP address and protocol.
-     */
-	union ipv4_5tuple_host key;
-	ipv4_hdr = (uint8_t *)ipv4_hdr + offsetof(struct ipv4_hdr, time_to_live);
-	key.xmm = em_mask_key(ipv4_hdr, mask0.x);
-	key.proto = 8;
-
-	uint32_t hash_value = rte_hash_crc((void *)&key, sizeof(key), 101);
-
-	uint32_t idx = hash_value % DIP_LOOKUP_ENTRIES;
-
-	tcp = (struct tcp_hdr *)((unsigned char *)hdr +
-							 sizeof(struct ipv4_hdr));
-
-	if (update_method == 150) {
-		// Update Transient DIP ID
-		lbtestbed_addr[idx].transient_dip_id = tcp->data_off;
-	}
-	else if (update_method == 151) {
-		// Reset Transient DIP ID
-		lbtestbed_addr[idx].transient_dip_id = -1;
-	}
-	else if (update_method == 152) {
-		// Swap and Reset Transient DIP ID
-		lbtestbed_addr[idx].existing_dip_id =
-				lbtestbed_addr[idx].transient_dip_id;
-		lbtestbed_addr[idx].transient_dip_id = -1;
-	}
-}
-
 static inline uint16_t
 em_get_ipv4_dst_port(void *ipv4_hdr, uint16_t portid, void *lookup_struct)
 {
