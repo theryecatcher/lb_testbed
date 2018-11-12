@@ -53,7 +53,7 @@ em_get_dst_ip_ipv4xN(struct lcore_conf *qconf, struct rte_mbuf *m[],
 {
     int i;
 //    int32_t ret[EM_HASH_LOOKUP_COUNT];
-    union ipv4_5tuple_host key[EM_HASH_LOOKUP_COUNT];
+//    union ipv4_5tuple_host key[EM_HASH_LOOKUP_COUNT];
 //    const void *key_array[EM_HASH_LOOKUP_COUNT];
     struct ipv4_hdr *ipv4_hdr;
 
