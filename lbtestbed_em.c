@@ -20,6 +20,7 @@
 #include <rte_tcp.h>
 #include <rte_udp.h>
 #include <rte_hash.h>
+#include <rte_hash_crc.h>
 
 #include "lbtestbed.h"
 #include "murmur3.h"
@@ -60,21 +61,14 @@ union ipv4_5tuple_host {
 	xmm_t xmm;
 };
 
-struct ipv4_l3fwd_em_route {
+struct ipv4_lbtestbed_em_route {
 	struct ipv4_5tuple key;
 	uint8_t if_out;
 };
 
-struct ipv4_addr_elem {
-    uint32_t ip_addr;
-    uint16_t weight;
-    uint32_t seed;
-    bool avaialble;
-};
-
-struct hash_128 {
-	uint64_t hash0;
-	uint64_t hash1;
+struct dip_addr_elem {
+    int8_t existing_dip_id;
+    int8_t transient_dip_id;
 };
 
 struct rte_hash *ipv4_lbtestbed_em_lookup_struct[NB_SOCKETS];
@@ -109,7 +103,8 @@ ipv4_hash_crc(const void *data, __rte_unused uint32_t data_len,
 static uint8_t ipv4_lbtestbed_out_if[LBTESTBED_HASH_ENTRIES] __rte_cache_aligned;
 static uint32_t ipv4_lbtestbed_out_ip[LBTESTBED_HASH_ENTRIES] __rte_cache_aligned;
 
-static struct ipv4_addr_elem lbtestbed_addr[NB_POOL_ADDRESSES]; __rte_cache_aligned;
+static struct dip_addr_elem lbtestbed_addr[DIP_LOOKUP_ENTRIES];
+static uint8_t lbtestbed_bloom_filter[BLOOM_FILTER_ENTRIES];
 
 static rte_xmm_t mask0;
 
@@ -141,37 +136,164 @@ em_mask_key(void *key, xmm_t mask)
 #error No vector engine (SSE, NEON, ALTIVEC) available, check your toolchain
 #endif
 
+static inline bool
+check_bloom_filter(uint32_t hash_value){
+
+	return ((lbtestbed_bloom_filter[(uint16_t)(hash_value>>16)] != 0) &&
+			(lbtestbed_bloom_filter[(uint16_t)hash_value] != 0));
+}
+
 static inline void
-calculate_weight(const uint32_t *seed, const void *key, double *score){
+update_bloom_filter(uint32_t hash_value){
 
-    struct hash_128 hash_value = {0, 0};
+	uint16_t hash0 = (uint16_t)(hash_value>>16);
+	uint16_t hash1 = (uint16_t)hash_value;
 
-    MurmurHash3_x86_128(key, sizeof(key), *seed, (void *)&hash_value);
-	double hash_f = (double)hash_value.hash1;
-    *score = 1.0 / -log(hash_f);
+	if (lbtestbed_bloom_filter[hash0] < 255) {
+		lbtestbed_bloom_filter[hash0]++;
+	}
+	if (lbtestbed_bloom_filter[hash1] < 255) {
+		lbtestbed_bloom_filter[hash1]++;
+	}
 }
 
 static inline uint32_t
 em_get_available_ip(void *ipv4_hdr){
-    // Need to replace key by the IPv4 flow
-    // for which we are supposed to assign IP
-	union ipv4_5tuple_host key;
-    uint node_idx = 0;
-    double max_score = 0;
-    double curr_score = 0;
 
-	key.xmm = em_mask_key(ipv4_hdr, mask0.x);
+	int8_t dip_id;
+    struct ipv4_hdr *hdr =
+            (struct ipv4_hdr *)ipv4_hdr;
+    struct tcp_hdr *tcp;
 
-    for (uint i = 0; i < sizeof(lbtestbed_addr); i++) {
+    /*
+     * Get 5 tuple: dst port, src port, dst IP address,
+     * src IP address and protocol.
+     */
+    union ipv4_5tuple_host key;
+    ipv4_hdr = (uint8_t *)ipv4_hdr + offsetof(struct ipv4_hdr, time_to_live);
+    key.xmm = em_mask_key(ipv4_hdr, mask0.x);
 
-        calculate_weight(&lbtestbed_addr[i].seed, (const void *)&key, &curr_score);
+    uint32_t hash_value = rte_hash_crc((void *)&key, sizeof(key), 101);
 
-        if (curr_score > max_score){
-            max_score = curr_score;
-            node_idx = i;
-        };
+    uint32_t idx = hash_value % DIP_LOOKUP_ENTRIES;
+
+    #define TH_SYN  0x02
+    #define TH_ACK  0x10
+
+    if (hdr->next_proto_id == IPPROTO_TCP) {
+        tcp = (struct tcp_hdr *)((unsigned char *)hdr +
+                                 sizeof(struct ipv4_hdr));
+
+        if (!((tcp->tcp_flags & TH_SYN) && !(tcp->tcp_flags & TH_ACK))) {
+            if (check_bloom_filter(hash_value)){
+				dip_id = lbtestbed_addr[idx].transient_dip_id;
+            }
+            else {
+				dip_id = lbtestbed_addr[idx].existing_dip_id;
+            }
+        }
+        else {
+            // Packet is a SYN
+            if (lbtestbed_addr[idx].transient_dip_id != -1) {
+				printf("Updating Bloom Filter with idx\n");
+            	update_bloom_filter(hash_value);
+				dip_id = lbtestbed_addr[idx].transient_dip_id;
+            }
+            else {
+				dip_id = lbtestbed_addr[idx].existing_dip_id;
+            }
+			printf("SYN IP For%"PRIu32" with dip %"PRIu32"\n",
+				   hdr->dst_addr, dip_id);
+        }
+		return ipv4_lbtestbed_out_ip[dip_id];
     }
-    return lbtestbed_addr[node_idx].ip_addr;
+    else {
+        return hdr->dst_addr;
+    }
+}
+
+static inline void
+update_transient_dip(void *ipv4_hdr){
+
+	uint update_method;
+	struct ipv4_hdr *hdr =
+			(struct ipv4_hdr *)ipv4_hdr;
+	struct tcp_hdr *tcp;
+
+	update_method = hdr->next_proto_id;
+
+	/*
+     * Get 5 tuple: dst port, src port, dst IP address,
+     * src IP address and protocol.
+     */
+	union ipv4_5tuple_host key;
+	ipv4_hdr = (uint8_t *)ipv4_hdr + offsetof(struct ipv4_hdr, time_to_live);
+	key.xmm = em_mask_key(ipv4_hdr, mask0.x);
+	key.proto = 8;
+
+	uint32_t hash_value = rte_hash_crc((void *)&key, sizeof(key), 101);
+
+	uint32_t idx = hash_value % DIP_LOOKUP_ENTRIES;
+
+	tcp = (struct tcp_hdr *)((unsigned char *)hdr +
+							 sizeof(struct ipv4_hdr));
+
+	if (update_method == 150) {
+		// Update Transient DIP ID
+		lbtestbed_addr[idx].transient_dip_id = tcp->data_off;
+	}
+	else if (update_method == 151) {
+		// Reset Transient DIP ID
+		lbtestbed_addr[idx].transient_dip_id = -1;
+	}
+	else if (update_method == 152) {
+		// Swap and Reset Transient DIP ID
+		lbtestbed_addr[idx].existing_dip_id =
+				lbtestbed_addr[idx].transient_dip_id;
+		lbtestbed_addr[idx].transient_dip_id = -1;
+	}
+}
+
+static inline void
+update_transient_dip(void *ipv4_hdr){
+
+	uint update_method;
+	struct ipv4_hdr *hdr =
+			(struct ipv4_hdr *)ipv4_hdr;
+	struct tcp_hdr *tcp;
+
+	update_method = hdr->next_proto_id;
+
+	/*
+     * Get 5 tuple: dst port, src port, dst IP address,
+     * src IP address and protocol.
+     */
+	union ipv4_5tuple_host key;
+	ipv4_hdr = (uint8_t *)ipv4_hdr + offsetof(struct ipv4_hdr, time_to_live);
+	key.xmm = em_mask_key(ipv4_hdr, mask0.x);
+	key.proto = 8;
+
+	uint32_t hash_value = rte_hash_crc((void *)&key, sizeof(key), 101);
+
+	uint32_t idx = hash_value % DIP_LOOKUP_ENTRIES;
+
+	tcp = (struct tcp_hdr *)((unsigned char *)hdr +
+							 sizeof(struct ipv4_hdr));
+
+	if (update_method == 150) {
+		// Update Transient DIP ID
+		lbtestbed_addr[idx].transient_dip_id = tcp->data_off;
+	}
+	else if (update_method == 151) {
+		// Reset Transient DIP ID
+		lbtestbed_addr[idx].transient_dip_id = -1;
+	}
+	else if (update_method == 152) {
+		// Swap and Reset Transient DIP ID
+		lbtestbed_addr[idx].existing_dip_id =
+				lbtestbed_addr[idx].transient_dip_id;
+		lbtestbed_addr[idx].transient_dip_id = -1;
+	}
 }
 
 static inline uint16_t
@@ -211,7 +333,7 @@ em_get_ipv4_dst_ip(void *ipv4_hdr, void *lookup_struct)
      */
     key.xmm = em_mask_key(ipv4_hdr, mask0.x);
 
-    /* Find destination ip */
+    /* Find destination port */
     ret = rte_hash_lookup(ipv4_lbtestbed_lookup_struct, (const void *)&key);
 
     return (ret < 0) ? 0 : ipv4_lbtestbed_out_ip[ret];
@@ -249,7 +371,7 @@ add_ipv4_flow_into_conn_table(void *lookup_struct, void *ipv4_hdr, uint32_t dst_
 	int32_t ret;
 	union ipv4_5tuple_host newkey;
 
-	struct rte_hash *ipv4_l3fwd_lookup_struct =
+	struct rte_hash *ipv4_lbtestbed_lookup_struct =
 			(struct rte_hash *)lookup_struct;
 
 	struct ipv4_hdr *hdr =
@@ -288,16 +410,13 @@ add_ipv4_flow_into_conn_table(void *lookup_struct, void *ipv4_hdr, uint32_t dst_
 								ALL_32_BITS, ALL_32_BITS} };
 
 	convert_ipv4_5tuple(&key, &newkey);
-	ret = rte_hash_add_key(ipv4_l3fwd_lookup_struct, (void *) &newkey);
+	ret = rte_hash_add_key(ipv4_lbtestbed_lookup_struct, (void *) &newkey);
 	if (ret < 0) {
 		rte_exit(EXIT_FAILURE, "Unable to add entry %" PRIu32
 							   " to the lbtestbed hash.\n", key.port_dst);
 	}
     ipv4_lbtestbed_out_if[ret] = 1;
     ipv4_lbtestbed_out_ip[ret] = dst_ip;
-
-	//printf("Hash: Adding 0x%" PRIx64 " keys\n",
-	//	   (uint64_t)IPV4_L3FWD_EM_NUM_ROUTES);
 }
 
 /* Requirements:
@@ -428,17 +547,17 @@ em_main_loop(__attribute__((unused)) void *dummy)
 	qconf = &lcore_conf[lcore_id];
 
 	if (qconf->n_rx_queue == 0) {
-		RTE_LOG(INFO, L3FWD, "lcore %u has nothing to do\n", lcore_id);
+		RTE_LOG(INFO, LBTESTBED, "lcore %u has nothing to do\n", lcore_id);
 		return 0;
 	}
 
-	RTE_LOG(INFO, L3FWD, "entering main loop on lcore %u\n", lcore_id);
+	RTE_LOG(INFO, LBTESTBED, "entering main loop on lcore %u\n", lcore_id);
 
 	for (i = 0; i < qconf->n_rx_queue; i++) {
 
 		portid = qconf->rx_queue_list[i].port_id;
 		queueid = qconf->rx_queue_list[i].queue_id;
-		RTE_LOG(INFO, L3FWD,
+		RTE_LOG(INFO, LBTESTBED,
 			" -- lcoreid=%u portid=%u rxqueueid=%hhu\n",
 			lcore_id, portid, queueid);
 	}
@@ -518,16 +637,22 @@ setup_hash(const int socketid)
 			socketid);
 
     /* Create Address Pool
-     * Possibly to be replaced with reading from a file */
-    for (int i = 1; i < NB_POOL_ADDRESSES; i++) {
-        lbtestbed_addr[i].ip_addr = IPv4(10, 0, 1, i);
-        lbtestbed_addr[i].avaialble = 1;
-        lbtestbed_addr[i].seed = (uint32_t)i;
-        lbtestbed_addr[i].weight = 3;
+     * Possibly to be replaced with reading from command line */
+    for (int i = 1; i < DIP_IP_ENTRIES; i++) {
+		ipv4_lbtestbed_out_ip[i] = IPv4(10, 0, 0, i);
+    }
+
+	/* Create Existing and transient table
+     * Possibly to be replaced with reading from command line */
+    for (int i = 0; i < (int)(DIP_LOOKUP_ENTRIES / DIP_IP_ENTRIES); i++) {
+		for (int8_t k = 1; k < DIP_IP_ENTRIES; k++, i++) {
+			lbtestbed_addr[i].existing_dip_id = k;
+			lbtestbed_addr[i].transient_dip_id = -1;
+		}
 	}
 }
 
-/* Return ipv4/ipv6 em fwd lookup struct. */
+/* Return ipv4 em fwd lookup struct. */
 void *
 em_get_ipv4_lbtestbed_lookup_struct(const int socketid)
 {

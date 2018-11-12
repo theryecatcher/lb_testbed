@@ -5,7 +5,7 @@
 
 #define DO_RFC_1812_CHECK
 
-#define RTE_LOGTYPE_L3FWD RTE_LOGTYPE_USER1
+#define RTE_LOGTYPE_LBTESTBED RTE_LOGTYPE_USER1
 
 #if !defined(NO_HASH_MULTI_LOOKUP) && defined(RTE_MACHINE_CPUFLAG_NEON)
 #define NO_HASH_MULTI_LOOKUP 1
@@ -23,8 +23,6 @@
 
 #define NB_SOCKETS        8
 
-#define NB_POOL_ADDRESSES   (16)
-
 /* Configure how many packets ahead to prefetch, when reading packets */
 #define PREFETCH_OFFSET	  3
 
@@ -35,6 +33,11 @@
 
 /* replace first 12B of the ethernet header. */
 #define	MASK_ETH 0x3f
+
+// Bloom Filter Parameters
+#define BLOOM_FILTER_ENTRIES		65536
+#define DIP_LOOKUP_ENTRIES		    65536
+#define DIP_IP_ENTRIES		        16
 
 /* Hash parameters. */
 #ifdef RTE_ARCH_64

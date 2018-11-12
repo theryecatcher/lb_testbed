@@ -33,6 +33,7 @@ rfc1812_process(struct ipv4_hdr *ipv4_hdr, uint16_t *dp, uint32_t ptype)
 
 		ipv4_hdr->time_to_live--;
 		//ipv4_hdr->hdr_checksum++;
+		ipv4_hdr->hdr_checksum = 0;
 		ipv4_hdr->hdr_checksum = rte_ipv4_cksum(ipv4_hdr);
 
 		if (ihl > IPV4_MAX_VER_IHL_DIFF ||
