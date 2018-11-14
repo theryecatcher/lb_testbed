@@ -20,10 +20,8 @@
 #include <rte_tcp.h>
 #include <rte_udp.h>
 #include <rte_hash.h>
-#include <rte_hash_crc.h>
 
 #include "lbtestbed.h"
-#include "murmur3.h"
 #include <math.h>
 
 #if defined(RTE_ARCH_X86) || defined(RTE_MACHINE_CPUFLAG_CRC32)
@@ -170,8 +168,23 @@ em_get_available_ip(void *ipv4_hdr){
      * src IP address and protocol.
      */
     union ipv4_5tuple_host key;
-    ipv4_hdr = (uint8_t *)ipv4_hdr + offsetof(struct ipv4_hdr, time_to_live);
-    key.xmm = em_mask_key(ipv4_hdr, mask0.x);
+    key.ip_dst = rte_be_to_cpu_32(hdr->dst_addr);
+    key.ip_src = rte_be_to_cpu_32(hdr->src_addr);
+    key.proto = hdr->next_proto_id;
+
+    switch (hdr->next_proto_id) {
+	case IPPROTO_TCP:
+	    tcp = (struct tcp_hdr *)((unsigned char *)hdr +
+				 sizeof(struct ipv4_hdr));
+	    key.port_dst = rte_be_to_cpu_16(tcp->dst_port);
+	    key.port_src = rte_be_to_cpu_16(tcp->src_port);
+	    break;
+
+	default:
+	    key.port_dst = 0;
+	    key.port_src = 0;
+	    break;
+    } 
 
     uint32_t hash_value = rte_hash_crc((void *)&key, sizeof(key), 101);
 
@@ -187,6 +200,7 @@ em_get_available_ip(void *ipv4_hdr){
         if (!((tcp->tcp_flags & TH_SYN) && !(tcp->tcp_flags & TH_ACK))) {
             if (check_bloom_filter(hash_value)){
 				dip_id = lbtestbed_addr[idx].transient_dip_id;
+				printf("Transient\n");
             }
             else {
 				dip_id = lbtestbed_addr[idx].existing_dip_id;
@@ -194,20 +208,23 @@ em_get_available_ip(void *ipv4_hdr){
         }
         else {
             // Packet is a SYN
+	    printf("IDX %"PRIu32"\n", idx);
+	    printf("Transient DIP %"PRIi32"\n", lbtestbed_addr[idx].transient_dip_id);
             if (lbtestbed_addr[idx].transient_dip_id != -1) {
-				printf("Updating Bloom Filter with idx\n");
+				printf("Updating Bloom Filter with hashval %"PRIu32"\n", hash_value);
             	update_bloom_filter(hash_value);
 				dip_id = lbtestbed_addr[idx].transient_dip_id;
             }
             else {
 				dip_id = lbtestbed_addr[idx].existing_dip_id;
             }
-			printf("SYN IP For%"PRIu32" with dip %"PRIu32"\n",
+			printf("SYN IP For %"PRIu32" with dip %"PRIu32"\n",
 				   hdr->dst_addr, dip_id);
         }
 		return ipv4_lbtestbed_out_ip[dip_id];
     }
     else {
+	printf("Not TCP\n");
         return hdr->dst_addr;
     }
 }
@@ -596,13 +613,13 @@ setup_hash(const int socketid)
 
     /* Create Address Pool
      * Possibly to be replaced with reading from command line */
-    for (int i = 1; i < DIP_IP_ENTRIES; i++) {
-		ipv4_lbtestbed_out_ip[i] = IPv4(10, 0, 0, i);
+    for (int i = 0; i < DIP_IP_ENTRIES-1; i++) {
+		ipv4_lbtestbed_out_ip[i] = IPv4(10, 0, 0, i+1);
     }
 
 	/* Create Existing and transient table
      * Possibly to be replaced with reading from command line */
-    for (int i = 0; i < (int)(DIP_LOOKUP_ENTRIES / DIP_IP_ENTRIES); i++) {
+    for (int i = 0; i < DIP_LOOKUP_ENTRIES; i++) {
 		for (int8_t k = 1; k < DIP_IP_ENTRIES; k++, i++) {
 			lbtestbed_addr[i].existing_dip_id = k;
 			lbtestbed_addr[i].transient_dip_id = -1;

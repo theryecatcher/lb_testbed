@@ -78,8 +78,6 @@ em_get_dst_ip_ipv4xN(struct lcore_conf *qconf, struct rte_mbuf *m[],
             // dst_ip[i] = IPv4(10, 0, 1, 0);
             dst_ip[i] = em_get_available_ip(ipv4_hdr);
             // 2. Add the hash to lookup table
-            printf("IP For%"PRIu32" with ip %"PRIu32"\n",
-                    ipv4_hdr->dst_addr, dst_ip[i]);
 //            add_ipv4_flow_into_conn_table(
 //                    qconf->ipv4_lookup_struct, ipv4_hdr, dst_ip[i]);
 //        }
