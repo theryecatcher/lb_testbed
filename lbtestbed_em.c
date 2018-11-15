@@ -202,8 +202,13 @@ em_get_available_ip(void *ipv4_hdr){
         }
         else {
             // Packet is a SYN
+<<<<<<< HEAD
 	        printf("IDX %"PRIu32"\n", idx);
 	        printf("Transient DIP %"PRIi32"\n", lbtestbed_addr[idx].transient_dip_id);
+=======
+	    printf("IDX %"PRIu32"\n", idx);
+	    printf("Transient DIP %"PRIi32"\n", lbtestbed_addr[idx].transient_dip_id);
+>>>>>>> 9ab7036a2569e550472e9585ba5e67f117f343e3
             if (lbtestbed_addr[idx].transient_dip_id != -1) {
 				printf("Updating Bloom Filter with hashval %"PRIu32"\n", hash_value);
             	update_bloom_filter(hash_value);
