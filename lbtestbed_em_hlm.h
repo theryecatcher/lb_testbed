@@ -21,105 +21,42 @@
 
 
 static __rte_always_inline void
-em_get_dst_port_ipv4xN(struct lcore_conf *qconf, struct rte_mbuf *m[],
+em_get_dst_port_ipv4xN(
 		uint16_t portid, uint16_t dst_port[])
 {
 	int i;
-	int32_t ret[EM_HASH_LOOKUP_COUNT];
-	union ipv4_5tuple_host key[EM_HASH_LOOKUP_COUNT];
-	const void *key_array[EM_HASH_LOOKUP_COUNT];
-
 	for (i = 0; i < EM_HASH_LOOKUP_COUNT; i++) {
-		get_ipv4_5tuple(m[i], mask0.x, &key[i]);
-		key_array[i] = &key[i];
-	}
-
-	rte_hash_lookup_bulk(qconf->ipv4_lookup_struct, &key_array[0],
-			     EM_HASH_LOOKUP_COUNT, ret);
-
-	for (i = 0; i < EM_HASH_LOOKUP_COUNT; i++) {
-		dst_port[i] = ((ret[i] < 0) ?
-				portid : ipv4_lbtestbed_out_if[ret[i]]);
-
-		if (dst_port[i] >= RTE_MAX_ETHPORTS ||
-				(enabled_port_mask & 1 << dst_port[i]) == 0)
-			dst_port[i] = portid;
+		dst_port[i] = portid;
 	}
 }
 
 static __rte_always_inline void
-em_get_dst_ip_ipv4xN(struct lcore_conf *qconf, struct rte_mbuf *m[],
+em_get_dst_ip_ipv4xN(struct rte_mbuf *m[],
                        uint32_t dst_ip[])
 {
     int i;
-//    int32_t ret[EM_HASH_LOOKUP_COUNT];
-//    union ipv4_5tuple_host key[EM_HASH_LOOKUP_COUNT];
-//    const void *key_array[EM_HASH_LOOKUP_COUNT];
     struct ipv4_hdr *ipv4_hdr;
 
-//    for (i = 0; i < EM_HASH_LOOKUP_COUNT; i++) {
-//        get_ipv4_5tuple(m[i], mask0.x, &key[i]);
-//        key_array[i] = &key[i];
-//    }
-//
-//    rte_hash_lookup_bulk(qconf->ipv4_lookup_struct, &key_array[0],
-//                         EM_HASH_LOOKUP_COUNT, ret);
-
     for (i = 0; i < EM_HASH_LOOKUP_COUNT; i++) {
-//        dst_ip[i] = ((ret[i] < 0) ?
-//                       0 : ipv4_lbtestbed_out_ip[ret[i]]);
-
-//        if (dst_ip[i] == 0) {
-            /* Get IPv4 header.*/
-            ipv4_hdr = rte_pktmbuf_mtod_offset(m[i], struct ipv4_hdr *,
-                                               sizeof(struct ether_hdr));
-            // 1. Pick one IP address according to the available
-            // addresses in the IP Table w.r.t their weights
-            // dst_ip[i] = IPv4(10, 0, 1, 0);
-            dst_ip[i] = em_get_available_ip(ipv4_hdr);
-            // 2. Add the hash to lookup table
-            printf("IP For%"PRIu32" with ip %"PRIu32"\n",
-                    ipv4_hdr->dst_addr, dst_ip[i]);
-//            add_ipv4_flow_into_conn_table(
-//                    qconf->ipv4_lookup_struct, ipv4_hdr, dst_ip[i]);
-//        }
+		/* Get IPv4 header.*/
+		ipv4_hdr = rte_pktmbuf_mtod_offset(m[i], struct ipv4_hdr *,
+										   sizeof(struct ether_hdr));
+		dst_ip[i] = em_get_available_ip(ipv4_hdr);
     }
 }
 
 static __rte_always_inline uint16_t
-em_get_dst_port(const struct lcore_conf *qconf, struct rte_mbuf *pkt,
+em_get_dst_port(
 		uint16_t portid)
 {
 	uint16_t next_hop;
-	struct ipv4_hdr *ipv4_hdr;
-	uint32_t tcp_or_udp;
-	uint32_t l3_ptypes;
+	next_hop = portid;
 
-	tcp_or_udp = pkt->packet_type & (RTE_PTYPE_L4_TCP | RTE_PTYPE_L4_UDP);
-	l3_ptypes = pkt->packet_type & RTE_PTYPE_L3_MASK;
-
-	if (tcp_or_udp && (l3_ptypes == RTE_PTYPE_L3_IPV4)) {
-
-		/* Handle IPv4 headers.*/
-		ipv4_hdr = rte_pktmbuf_mtod_offset(pkt, struct ipv4_hdr *,
-				sizeof(struct ether_hdr));
-
-		next_hop = em_get_ipv4_dst_port(ipv4_hdr, portid,
-				qconf->ipv4_lookup_struct);
-
-		if (next_hop >= RTE_MAX_ETHPORTS ||
-				(enabled_port_mask & 1 << next_hop) == 0)
-			next_hop = portid;
-
-		return next_hop;
-
-	}
-
-	return portid;
+	return next_hop;
 }
 
 static __rte_always_inline uint32_t
-em_get_dst_ip(const struct lcore_conf *qconf, struct rte_mbuf *pkt)
+em_get_dst_ip(struct rte_mbuf *pkt)
 {
     uint32_t next_ip;
     struct ipv4_hdr *ipv4_hdr;
@@ -136,21 +73,7 @@ em_get_dst_ip(const struct lcore_conf *qconf, struct rte_mbuf *pkt)
     uint32_t current_addr = ipv4_hdr->dst_addr;
 
     if (tcp_or_udp && (l3_ptypes == RTE_PTYPE_L3_IPV4)) {
-
-        //next_ip = em_get_ipv4_dst_ip(ipv4_hdr,
-        //                                qconf->ipv4_lookup_struct);
-
-        //if (next_ip == 0) {
-            // 1. Pick one IP address according to the available
-            // addresses in the IP Table w.r.t their weights
-            // next_ip = IPv4(10, 0, 1, 0);
-            next_ip = em_get_available_ip(ipv4_hdr);
-            // 2. Add the hash to lookup table
-            printf("Single IP for %"PRIu32" with ip %"PRIu32"\n",
-                   ipv4_hdr->dst_addr, next_ip);
-            //add_ipv4_flow_into_conn_table(
-            //        qconf->ipv4_lookup_struct, ipv4_hdr, next_ip);
-        //}
+		next_ip = em_get_available_ip(ipv4_hdr);
 
         return next_ip;
     }
@@ -200,26 +123,25 @@ lbtestbed_em_send_packets(int nb_rx, struct rte_mbuf **pkts_burst,
 
 		if (tcp_or_udp && (l3_type == RTE_PTYPE_L3_IPV4)) {
 
-            em_get_dst_ip_ipv4xN(qconf, &pkts_burst[j], &dst_ip[j]);
+            em_get_dst_ip_ipv4xN(&pkts_burst[j], &dst_ip[j]);
 
-			em_get_dst_port_ipv4xN(qconf, &pkts_burst[j], portid,
+			em_get_dst_port_ipv4xN(portid,
 					       &dst_port[j]);
 
 		} else {
 			for (i = 0; i < EM_HASH_LOOKUP_COUNT; i++) {
 
-                dst_ip[j + i] = em_get_dst_ip(qconf,
+                dst_ip[j + i] = em_get_dst_ip(
                             pkts_burst[j + i]);
 
-                dst_port[j + i] = em_get_dst_port(qconf,
-                            pkts_burst[j + i], portid);
+                dst_port[j + i] = em_get_dst_port(portid);
             }
 		}
 	}
 
 	for (; j < nb_rx; j++) {
-        dst_ip[j] = em_get_dst_ip(qconf, pkts_burst[j]);
-        dst_port[j] = em_get_dst_port(qconf, pkts_burst[j], portid);
+        dst_ip[j] = em_get_dst_ip(pkts_burst[j]);
+        dst_port[j] = em_get_dst_port(portid);
     }
 
 	send_packets_multi(qconf, pkts_burst, dst_ip, dst_port, nb_rx);

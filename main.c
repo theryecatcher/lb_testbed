@@ -131,17 +131,15 @@ struct lbtestbed_lkp_mode {
 	int   (*check_ptype)(int);
 	rte_rx_callback_fn cb_parse_ptype;
 	int   (*main_loop)(void *);
-	void* (*get_ipv4_lookup_struct)(int);
 };
 
 static struct lbtestbed_lkp_mode lbtestbed_lkp;
 
 static struct lbtestbed_lkp_mode lbtestbed_em_lkp = {
-	.setup                  = setup_hash,
+	.setup                  = setup_func,
 	.check_ptype		= em_check_ptype,
 	.cb_parse_ptype		= em_cb_parse_ptype,
 	.main_loop              = em_main_loop,
-	.get_ipv4_lookup_struct = em_get_ipv4_lbtestbed_lookup_struct,
 };
 
 /*
@@ -546,7 +544,6 @@ print_ethaddr(const char *name, const struct ether_addr *eth_addr)
 static int
 init_mem(unsigned nb_mbuf)
 {
-	struct lcore_conf *qconf;
 	int socketid;
 	unsigned lcore_id;
 	char s[64];
@@ -583,9 +580,6 @@ init_mem(unsigned nb_mbuf)
 			/* Setup EM(f.e Hash).  */
 			lbtestbed_lkp.setup(socketid);
 		}
-		qconf = &lcore_conf[lcore_id];
-		qconf->ipv4_lookup_struct =
-			lbtestbed_lkp.get_ipv4_lookup_struct(socketid);
 	}
 	return 0;
 }

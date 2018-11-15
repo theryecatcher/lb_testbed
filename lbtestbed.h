@@ -169,14 +169,10 @@ is_valid_ipv4_pkt(struct ipv4_hdr *pkt, uint32_t link_len)
 
 /* Function pointers EM functionality. */
 void
-setup_hash(const int socketid);
+setup_func(const int socketid);
 
 int
 em_check_ptype(int portid);
-
-void
-add_ipv4_flow_into_conn_table(void *lookup_struct,
-                              void *ipv4_hdr, uint32_t dst_ip);
 
 uint16_t
 em_cb_parse_ptype(uint16_t port, uint16_t queue, struct rte_mbuf *pkts[],

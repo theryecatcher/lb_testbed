@@ -20,10 +20,8 @@
 #include <rte_tcp.h>
 #include <rte_udp.h>
 #include <rte_hash.h>
-#include <rte_hash_crc.h>
 
 #include "lbtestbed.h"
-#include "murmur3.h"
 #include <math.h>
 
 #if defined(RTE_ARCH_X86) || defined(RTE_MACHINE_CPUFLAG_CRC32)
@@ -61,11 +59,6 @@ union ipv4_5tuple_host {
 	xmm_t xmm;
 };
 
-struct ipv4_lbtestbed_em_route {
-	struct ipv4_5tuple key;
-	uint8_t if_out;
-};
-
 struct dip_addr_elem {
     int8_t existing_dip_id;
     int8_t transient_dip_id;
@@ -100,7 +93,6 @@ ipv4_hash_crc(const void *data, __rte_unused uint32_t data_len,
 	return init_val;
 }
 
-static uint8_t ipv4_lbtestbed_out_if[LBTESTBED_HASH_ENTRIES] __rte_cache_aligned;
 static uint32_t ipv4_lbtestbed_out_ip[LBTESTBED_HASH_ENTRIES] __rte_cache_aligned;
 
 static struct dip_addr_elem lbtestbed_addr[DIP_LOOKUP_ENTRIES];
@@ -170,8 +162,23 @@ em_get_available_ip(void *ipv4_hdr){
      * src IP address and protocol.
      */
     union ipv4_5tuple_host key;
-    ipv4_hdr = (uint8_t *)ipv4_hdr + offsetof(struct ipv4_hdr, time_to_live);
-    key.xmm = em_mask_key(ipv4_hdr, mask0.x);
+    key.ip_dst = rte_be_to_cpu_32(hdr->dst_addr);
+    key.ip_src = rte_be_to_cpu_32(hdr->src_addr);
+    key.proto = hdr->next_proto_id;
+
+    switch (hdr->next_proto_id) {
+	case IPPROTO_TCP:
+	    tcp = (struct tcp_hdr *)((unsigned char *)hdr +
+				 sizeof(struct ipv4_hdr));
+	    key.port_dst = rte_be_to_cpu_16(tcp->dst_port);
+	    key.port_src = rte_be_to_cpu_16(tcp->src_port);
+	    break;
+
+	default:
+	    key.port_dst = 0;
+	    key.port_src = 0;
+	    break;
+    } 
 
     uint32_t hash_value = rte_hash_crc((void *)&key, sizeof(key), 101);
 
@@ -187,6 +194,7 @@ em_get_available_ip(void *ipv4_hdr){
         if (!((tcp->tcp_flags & TH_SYN) && !(tcp->tcp_flags & TH_ACK))) {
             if (check_bloom_filter(hash_value)){
 				dip_id = lbtestbed_addr[idx].transient_dip_id;
+				printf("Transient\n");
             }
             else {
 				dip_id = lbtestbed_addr[idx].existing_dip_id;
@@ -194,20 +202,23 @@ em_get_available_ip(void *ipv4_hdr){
         }
         else {
             // Packet is a SYN
+	        printf("IDX %"PRIu32"\n", idx);
+	        printf("Transient DIP %"PRIi32"\n", lbtestbed_addr[idx].transient_dip_id);
             if (lbtestbed_addr[idx].transient_dip_id != -1) {
-				printf("Updating Bloom Filter with idx\n");
+				printf("Updating Bloom Filter with hashval %"PRIu32"\n", hash_value);
             	update_bloom_filter(hash_value);
 				dip_id = lbtestbed_addr[idx].transient_dip_id;
             }
             else {
 				dip_id = lbtestbed_addr[idx].existing_dip_id;
             }
-			printf("SYN IP For%"PRIu32" with dip %"PRIu32"\n",
+			printf("SYN IP For %"PRIu32" with dip %"PRIu32"\n",
 				   hdr->dst_addr, dip_id);
         }
 		return ipv4_lbtestbed_out_ip[dip_id];
     }
     else {
+	printf("Not TCP\n");
         return hdr->dst_addr;
     }
 }
@@ -252,27 +263,6 @@ update_transient_dip(void *ipv4_hdr){
 				lbtestbed_addr[idx].transient_dip_id;
 		lbtestbed_addr[idx].transient_dip_id = -1;
 	}
-}
-
-static inline uint16_t
-em_get_ipv4_dst_port(void *ipv4_hdr, uint16_t portid, void *lookup_struct)
-{
-	int ret = 0;
-	union ipv4_5tuple_host key;
-	struct rte_hash *ipv4_lbtestbed_lookup_struct =
-		(struct rte_hash *)lookup_struct;
-
-	ipv4_hdr = (uint8_t *)ipv4_hdr + offsetof(struct ipv4_hdr, time_to_live);
-
-	/*
-	 * Get 5 tuple: dst port, src port, dst IP address,
-	 * src IP address and protocol.
-	 */
-	key.xmm = em_mask_key(ipv4_hdr, mask0.x);
-
-	/* Find destination port */
-	ret = rte_hash_lookup(ipv4_lbtestbed_lookup_struct, (const void *)&key);
-	return (ret < 0) ? portid : ipv4_lbtestbed_out_if[ret];
 }
 
 static inline uint32_t
@@ -323,59 +313,6 @@ convert_ipv4_5tuple(struct ipv4_5tuple *key1,
 #define BYTE_VALUE_MAX 256
 #define ALL_32_BITS 0xffffffff
 #define BIT_8_TO_15 0x0000ff00
-
-void
-add_ipv4_flow_into_conn_table(void *lookup_struct, void *ipv4_hdr, uint32_t dst_ip) {
-	int32_t ret;
-	union ipv4_5tuple_host newkey;
-
-	struct rte_hash *ipv4_lbtestbed_lookup_struct =
-			(struct rte_hash *)lookup_struct;
-
-	struct ipv4_hdr *hdr =
-			(struct ipv4_hdr *)ipv4_hdr;
-
-	struct ipv4_5tuple key;
-	struct tcp_hdr *tcp;
-	struct udp_hdr *udp;
-
-	key.ip_dst = rte_be_to_cpu_32(hdr->dst_addr);
-	key.ip_src = rte_be_to_cpu_32(hdr->src_addr);
-	key.proto = hdr->next_proto_id;
-
-	switch (hdr->next_proto_id) {
-		case IPPROTO_TCP:
-			tcp = (struct tcp_hdr *)((unsigned char *)hdr +
-									 sizeof(struct ipv4_hdr));
-			key.port_dst = rte_be_to_cpu_16(tcp->dst_port);
-			key.port_src = rte_be_to_cpu_16(tcp->src_port);
-			break;
-
-		case IPPROTO_UDP:
-			udp = (struct udp_hdr *)((unsigned char *)ipv4_hdr +
-									 sizeof(struct ipv4_hdr));
-			key.port_dst = rte_be_to_cpu_16(udp->dst_port);
-			key.port_src = rte_be_to_cpu_16(udp->src_port);
-			break;
-
-		default:
-			key.port_dst = 0;
-			key.port_src = 0;
-			break;
-	}
-
-	mask0 = (rte_xmm_t){.u32 = {BIT_8_TO_15, ALL_32_BITS,
-								ALL_32_BITS, ALL_32_BITS} };
-
-	convert_ipv4_5tuple(&key, &newkey);
-	ret = rte_hash_add_key(ipv4_lbtestbed_lookup_struct, (void *) &newkey);
-	if (ret < 0) {
-		rte_exit(EXIT_FAILURE, "Unable to add entry %" PRIu32
-							   " to the lbtestbed hash.\n", key.port_dst);
-	}
-    ipv4_lbtestbed_out_if[ret] = 1;
-    ipv4_lbtestbed_out_ip[ret] = dst_ip;
-}
 
 /* Requirements:
  * 1. IP packets without extension;
@@ -568,51 +505,23 @@ em_main_loop(__attribute__((unused)) void *dummy)
 }
 
 /*
- * Initialize exact match (hash) parameters.
+ * Initialize parameters.
  */
 void
-setup_hash(const int socketid)
+setup_func(const int socketid)
 {
-	struct rte_hash_parameters ipv4_lbtestbed_hash_params = {
-		.name = NULL,
-		.entries = LBTESTBED_HASH_ENTRIES,
-		.key_len = sizeof(union ipv4_5tuple_host),
-		.hash_func = ipv4_hash_crc,
-		.hash_func_init_val = 0,
-	};
-
-	char s[64];
-
-	/* create ipv4 hash */
-	snprintf(s, sizeof(s), "ipv4_lbtestbed_hash_%d", socketid);
-    ipv4_lbtestbed_hash_params.name = s;
-    ipv4_lbtestbed_hash_params.socket_id = socketid;
-    ipv4_lbtestbed_em_lookup_struct[socketid] =
-		rte_hash_create(&ipv4_lbtestbed_hash_params);
-	if (ipv4_lbtestbed_em_lookup_struct[socketid] == NULL)
-		rte_exit(EXIT_FAILURE,
-			"Unable to create the lbtestbed hash on socket %d\n",
-			socketid);
-
-    /* Create Address Pool
+	/* Create Address Pool
      * Possibly to be replaced with reading from command line */
-    for (int i = 1; i < DIP_IP_ENTRIES; i++) {
-		ipv4_lbtestbed_out_ip[i] = IPv4(10, 0, 0, i);
+    for (int i = 0; i < DIP_IP_ENTRIES-1; i++) {
+		ipv4_lbtestbed_out_ip[i] = IPv4(10, 0, 0, i+1);
     }
 
 	/* Create Existing and transient table
      * Possibly to be replaced with reading from command line */
-    for (int i = 0; i < (int)(DIP_LOOKUP_ENTRIES / DIP_IP_ENTRIES); i++) {
+    for (int i = 0; i < DIP_LOOKUP_ENTRIES; i++) {
 		for (int8_t k = 1; k < DIP_IP_ENTRIES; k++, i++) {
 			lbtestbed_addr[i].existing_dip_id = k;
 			lbtestbed_addr[i].transient_dip_id = -1;
 		}
 	}
-}
-
-/* Return ipv4 em fwd lookup struct. */
-void *
-em_get_ipv4_lbtestbed_lookup_struct(const int socketid)
-{
-	return ipv4_lbtestbed_em_lookup_struct[socketid];
 }
