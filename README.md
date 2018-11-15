@@ -13,7 +13,7 @@ export RTE_TARGET=x86_64-native-linuxapp-gcc
 ### Running the Application
 The application needs a few command line options as below
 ```
-./l3fwd [EAL options] -- -p PORTMASK --config(port,queue,lcore)[,(port,queue,lcore)]
+./lb_testbed [EAL options] -- -p PORTMASK --config(port,queue,lcore)[,(port,queue,lcore)]
 ```    
 For Example:
 ```
