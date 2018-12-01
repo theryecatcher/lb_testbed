@@ -229,40 +229,51 @@ update_transient_dip(void *ipv4_hdr){
 	uint update_method;
 	struct ipv4_hdr *hdr =
 			(struct ipv4_hdr *)ipv4_hdr;
-	struct tcp_hdr *tcp;
+	struct tcp_hdr *update_hdr;
 
 	update_method = hdr->next_proto_id;
 
-	/*
-     * Get 5 tuple: dst port, src port, dst IP address,
-     * src IP address and protocol.
-     */
-	union ipv4_5tuple_host key;
-	ipv4_hdr = (uint8_t *)ipv4_hdr + offsetof(struct ipv4_hdr, time_to_live);
-	key.xmm = em_mask_key(ipv4_hdr, mask0.x);
-	key.proto = 8;
+	if (hdr->next_proto_id == 150 || hdr->next_proto_id == 151 || hdr->next_proto_id == 152) {
+        /*
+         * Get 5 tuple: dst port, src port, dst IP address,
+         * src IP address and protocol.
+         */
+        union ipv4_5tuple_host key;
+        key.ip_dst = rte_be_to_cpu_32(hdr->dst_addr);
+        key.ip_src = rte_be_to_cpu_32(hdr->src_addr);
+        key.proto = 0x06; // Reset to TCP Protocol number for correct hash calculation
 
-	uint32_t hash_value = rte_hash_crc((void *)&key, sizeof(key), 101);
+        update_hdr = (struct tcp_hdr *) ((unsigned char *) hdr +
+                                  sizeof(struct ipv4_hdr));
+        key.port_dst = rte_be_to_cpu_16(update_hdr->dst_port);
+        key.port_src = rte_be_to_cpu_16(update_hdr->src_port);
 
-	uint32_t idx = hash_value % DIP_LOOKUP_ENTRIES;
+        uint32_t hash_value = rte_hash_crc((void *) &key, sizeof(key), 101);
 
-	tcp = (struct tcp_hdr *)((unsigned char *)hdr +
-							 sizeof(struct ipv4_hdr));
+        uint32_t idx = hash_value % DIP_LOOKUP_ENTRIES;
 
-	if (update_method == 150) {
-		// Update Transient DIP ID
-		lbtestbed_addr[idx].transient_dip_id = tcp->data_off;
-	}
-	else if (update_method == 151) {
-		// Reset Transient DIP ID
-		lbtestbed_addr[idx].transient_dip_id = -1;
-	}
-	else if (update_method == 152) {
-		// Swap and Reset Transient DIP ID
-		lbtestbed_addr[idx].existing_dip_id =
-				lbtestbed_addr[idx].transient_dip_id;
-		lbtestbed_addr[idx].transient_dip_id = -1;
-	}
+        switch (hdr->next_proto_id) {
+            case 150:
+                // Update Transient DIP ID
+                printf("Update Transient DIP ID for idx %"PRIu32"\n", idx);
+                lbtestbed_addr[idx].transient_dip_id = update_hdr->data_off;
+                break;
+            case 151:
+                // Reset Transient DIP ID
+                printf("Reset Transient DIP ID\n");
+                lbtestbed_addr[idx].transient_dip_id = -1;
+                break;
+            case 152:
+                // Swap and Reset Transient DIP ID
+                printf("Swap and Reset Transient DIP ID\n");
+                lbtestbed_addr[idx].existing_dip_id =
+                        lbtestbed_addr[idx].transient_dip_id;
+                lbtestbed_addr[idx].transient_dip_id = -1;
+                break;
+            default:
+                break;
+        }
+    }
 }
 
 static inline uint32_t

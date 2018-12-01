@@ -76,6 +76,9 @@ em_get_dst_ip(struct rte_mbuf *pkt)
 		next_ip = em_get_available_ip(ipv4_hdr);
 
         return next_ip;
+    } else {
+	printf("Non TCP/UDP IP packet detected\n");
+	update_transient_dip(ipv4_hdr);
     }
     return current_addr;
 }
